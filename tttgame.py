@@ -1,6 +1,5 @@
 import tttgameai as ai
 import tttgamedata as data
-from alphatoe import AlphaToe
 
 class TicTacToeGame:
     # Function: Constructor
@@ -11,7 +10,7 @@ class TicTacToeGame:
         # Represents the current game state
         # Update this variable as the game progresses
         self.currentState = data.GameState()
-        self.toe = AlphaToe()
+        self.toe = ai.AlphaToe()
     
     # Function: getBoard
     # Purpose: Return the current GameState
@@ -46,7 +45,8 @@ class TicTacToeGame:
         return ai.winner(self.currentState)
     
     def printBoard(self):
-        print("-" * 15)
+        print(" ", end="")
+        print("-" * 11)
         for row in range(3):
             print("|", end="")
             for col in range(3):
@@ -55,4 +55,5 @@ class TicTacToeGame:
                 display = cell if cell != " " else str(idx + 1)
                 print(f" {display} |", end="")
             print()
-            print("-" * 15)
+            print(" ", end="")
+            print("-" * 11)
