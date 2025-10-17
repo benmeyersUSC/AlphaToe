@@ -583,8 +583,8 @@ def alphazero_training_loop(
                 tttg.printBoard()
 
                 if ai.winner(tttg.getBoard()) == " ":
-                    # inference = ai.pickMove(tttg.getBoard(), tttg.toe, "O")
-                    inference = ai.pickMove(tttg.getBoard(), None, "O")
+                    inference = ai.pickMove(tttg.getBoard(), tttg.toe, "O")
+                    # inference = ai.pickMove(tttg.getBoard(), None, "O")
                     move = inference[0]
                     data = inference[1]
                     # training_data.append(data)
