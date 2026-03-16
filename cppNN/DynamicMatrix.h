@@ -29,5 +29,8 @@ public:
     [[nodiscard]] DynamicMatrix Transpose() const;
     [[nodiscard]] DynamicMatrix ElemWiseMult(const DynamicMatrix& other) const;
     DynamicMatrix operator-(const DynamicMatrix& other) const;
+
+    [[nodiscard]] const std::vector<float>& _data()const{return mData;}
+     std::vector<float>& _data(){return mData;}
 };
 

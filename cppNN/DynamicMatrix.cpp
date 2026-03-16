@@ -5,7 +5,7 @@
 #include "DynamicMatrix.h"
 #include <stdexcept>
 #include <string>
-
+#include <functional>
 DynamicMatrix::DynamicMatrix(const size_t rows, const size_t cols, const float init)
     : mData(rows * cols, init), mRows(rows), mCols(cols) {}
 
@@ -113,10 +113,6 @@ DynamicMatrix DynamicMatrix::operator-(const DynamicMatrix& other) const {
 // apply a function to each value
 DynamicMatrix DynamicMatrix::Apply(const std::function<float(float)>& fn) const {
     DynamicMatrix result(mRows, mCols);
-    for (size_t i = 0; i < mRows; i++) {
-        for (size_t j = 0; j < mCols; j++) {
-            result.at(i, j) = fn(at(i, j));
-        }
-    }
+    std::transform(mData.begin(), mData.end(), result.mData.begin(), fn);
     return result;
 }

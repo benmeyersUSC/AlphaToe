@@ -6,6 +6,9 @@
 #include <vector>
 #include <string>
 #include "DynamicMatrix.h"
+#define MAT DynamicMatrix
+#define MATVEC std::vector<MAT>
+
 
 // available activation functions
 enum class Activation {Input, Sigmoid, ReLU, Softmax, Tanh};
@@ -23,55 +26,64 @@ inline std::string_view ActivationName(const Activation& a) {
 
 // wrapper for weights, bias, and activation function
 struct Layer {
-    DynamicMatrix weights;  // [out_neurons x in_neurons]
-    DynamicMatrix biases;   // [out_neurons x 1]
+    MAT weights;  // [out_neurons x in_neurons]
+    MAT biases;   // [out_neurons x 1]
     Activation activation;
 
     // compute a full forward pass at this layer, taking in another matrix as input
-    [[nodiscard]] DynamicMatrix forward(const DynamicMatrix& input) const;
+    [[nodiscard]] MAT forward(const MAT& input) const;
 };
 
 struct TrainSnapshot {
-    std::vector<DynamicMatrix> activations;     // [a0=input, a1, ..., aL]
-    std::vector<DynamicMatrix> deltas;          // [delta1, ..., deltaL], one per layer
-    std::vector<DynamicMatrix> weightGradients; // [dW1, ..., dWL], same shape as weights
+    MATVEC activations;     // [a0=input, a1, ..., aL]
+    MATVEC deltas;          // [delta1, ..., deltaL], one per layer
+    MATVEC weightGradients; // [dW1, ..., dWL], same shape as weights
     float loss = 0.0f;
 };
+
+static MAT Activate(const MAT& m, Activation a);
 
 class NeuralNetwork {
     std::vector<Layer> mLayers;
 
     // Adam state, moments for each weight and bias
-    std::vector<DynamicMatrix> mMW, mVW;  // weight moments
-    std::vector<DynamicMatrix> mMB, mVB;  // bias moments
-    int mT = 0;                           // timestep
+    MATVEC mMW, mVW;  // weight moments
+    MATVEC mMB, mVB;  // bias moments
+    int mT = 0;       // timestep
+    static constexpr float mMoment1W = 0.9f, mMoment2W = 0.999f, eps = 1e-8f;
+    static constexpr float mInvMoment1W = 1.0f - mMoment1W, mInvMoment2W = 1.0f - mMoment2W;
 
     void initAdamState();
-
+    [[nodiscard]] std::pair<MATVEC, MATVEC> TrainForward(const MAT& input)const ;
+    static float CrossEntropyLoss(const MAT& result, const MAT& target) ;
+    [[nodiscard]] std::tuple<MATVEC, MATVEC, MATVEC> TrainBackward( size_t L, const MATVEC& Z, const MATVEC& A, const MAT& target)const ;
+    static void L1(MATVEC&, float& loss, float l1);
+    void Adam(size_t L, float lr, const MATVEC& dW, const MATVEC& dB);
 public:
     NeuralNetwork() = default;
 
-    // Programmatically add a layer (call in order from input to output).
     // inSize must match previous layer's outSize
     void AddLayer(size_t inSize, size_t outSize, Activation act);
 
-    // Binary serialization — saves/loads weights and biases for all layers.
+    // binary serialization of entire class
     void Save(const std::string& path) const;
     void Load(const std::string& path);
 
-    // Forward pass. Input must be a column vector [input_size x 1].
-    [[nodiscard]] DynamicMatrix forward(const DynamicMatrix& input) const;
+    // forward pass. input must be a column vector [input_size x 1].
+    [[nodiscard]] MAT forward(const MAT& input) const;
 
-    // Returns activations at every layer including input.
-    // Result[0] = input, Result[i] = output of layer[i-1]. Size = layers + 1.
-    [[nodiscard]] std::vector<DynamicMatrix> ForwardAll(const DynamicMatrix& input) const;
+    // computes forward pass and returns vector of activations (including input)
+    [[nodiscard]] MATVEC ForwardAll(const MAT& input) const;
 
     [[nodiscard]] const std::vector<Layer>& Layers() const { return mLayers; }
 
-    // One training step with Adam optimizer. Returns snapshot (activations/gradients) for visualization.
-    // loss = cross-entropy. l1: optional L1 regularization.
-    TrainSnapshot TrainStep(const DynamicMatrix& input, const DynamicMatrix& target, float lr, float l1 = 0.0f);
+    // train one step of CE Loss, Adam optimized, with optional L1 reg
+    // returns TrainSnapshot object {vector: activations, vector: deltas, vector: weightGradients, float: loss}
+    TrainSnapshot TrainStep(const MAT& input, const MAT& target, float lr, float l1 = 0.0f);
 
     void operator<<(std::ostream& os) const;
 };
 
+
+#undef MAT
+#undef MATVEC

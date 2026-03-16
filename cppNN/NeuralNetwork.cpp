@@ -9,55 +9,75 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <functional>
+
+#define MAT DynamicMatrix
+#define MATVEC std::vector<MAT>
 
 
-static float sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
-static float relu(float x)    { return x > 0.0f ? x : 0.0f; }
-static float tanhAct(float x) { return std::tanh(x); }
-
-static DynamicMatrix softmax(const DynamicMatrix& z) {
-    // get max
-    float maxVal = z.at(0, 0);
-    for (size_t i = 1; i < z.Rows(); i++) {
-        maxVal = std::max(maxVal, z.at(i, 0));
-    }
-
-    DynamicMatrix out(z.Rows(), 1);
-    float sum = 0.0f;
-    for (size_t i = 0; i < z.Rows(); i++) {
-        // subtract maxVal from power so maximum becomes e^(maxVal-maxVal) = e^0 = 1
-        out.at(i, 0) = std::exp(z.at(i, 0) - maxVal);
-        // summate
-        sum += out.at(i, 0);
-    }
-    // and normalize each spot by sum
-    for (size_t i = 0; i < out.Rows(); i++) {
-        out.at(i, 0) /= sum;
-    }
-    return out;
+static float sigmoid(const float x) {
+    return 1.0f / (1.0f + std::exp(-x));
+}
+static float relu(const float x) {
+    return x > 0.0f ? x : 0.0f;
+}
+static float tanhAct(const float x) {
+    return std::tanh(x);
 }
 
-DynamicMatrix Layer::forward(const DynamicMatrix& input) const {
-    // get raw linear result
-    const DynamicMatrix z = weights * input + biases;
+// assumes z.Cols() == 1
+static MAT softmax(const MAT& z) {
+    if (z.Cols() != 1) {
+        throw std::runtime_error("Input matrix must be column vector.");
+    }
+    MAT result(z.Rows(), 1);
 
-    if (activation == Activation::Softmax) return softmax(z);
+    // extract max for numerical stability
+    const float maxVal = std::accumulate(z._data().begin(), z._data().end(), -std::numeric_limits<float>::infinity(),
+        [](const float a, const float b) {
+        return std::max(a, b);
+    });
 
-    const auto fn = activation == Activation::Sigmoid ? sigmoid : activation == Activation::Tanh ? tanhAct : relu;
-    return z.Apply(fn);
+    // summate and fill result
+    float sum = 0.0f;
+    std::transform(z._data().begin(), z._data().end(), result._data().begin(),
+        [&sum, &maxVal](const float f) {
+        const auto res = std::exp(f - maxVal);
+        sum += res;
+        return res;
+    });
+
+    // normalize
+    std::transform(result._data().begin(), result._data().end(), result._data().begin(),
+        [&sum](const float f) {
+        return f/sum;
+    });
+    return result;
+}
+
+MAT Layer::forward(const MAT& input) const {
+    const MAT z = weights * input + biases;
+
+    return Activate(z, activation);
 }
 
 // activation derivatives
-static float sigmoidPrime(float a) { return a * (1.0f - a); }           // takes post-activation
-static float reluPrime(float z)    { return z > 0.0f ? 1.0f : 0.0f; }  // takes pre-activation
-static float tanhPrime(float a)    { return 1.0f - a * a; }             // takes post-activation
+static float sigmoidPrime(const float a) {
+    return a * (1.0f - a);
+}
+static float reluPrime(const float z) {
+    return z > 0.0f ? 1.0f : 0.0f;
+}
+static float tanhPrime(const float a) {
+    return 1.0f - a * a;
+}
 
-static DynamicMatrix softmaxDelta(const DynamicMatrix& a, const DynamicMatrix& e) {
+static MAT softmaxDelta(const MAT& a, const MAT& e) {
     float dot = 0.0f;
     for (size_t i = 0; i < a.Rows(); i++) {
         dot += a.at(i, 0) * e.at(i, 0);
     }
-    DynamicMatrix d(a.Rows(), 1);
+    MAT d(a.Rows(), 1);
     for (size_t i = 0; i < a.Rows(); i++) {
         d.at(i, 0) = a.at(i, 0) * (e.at(i, 0) - dot);
     }
@@ -65,54 +85,56 @@ static DynamicMatrix softmaxDelta(const DynamicMatrix& a, const DynamicMatrix& e
 }
 
 void NeuralNetwork::AddLayer(const size_t inSize, const size_t outSize, const Activation act) {
-    static std::mt19937 rng(std::random_device{}());
-    mLayers.push_back({ DynamicMatrix(outSize, inSize), DynamicMatrix(outSize, 1), act });
+    mLayers.push_back({ MAT(outSize, inSize), MAT(outSize, 1), act });
     initAdamState();
+}
+
+MAT Activate(const MAT &m, const Activation a) {
+    switch (a) {
+        case Activation::Softmax : return softmax(m);
+        case Activation::ReLU : return m.Apply(relu);
+        case Activation::Sigmoid : return m.Apply(sigmoid);
+        case Activation::Tanh: return m.Apply(tanhAct);
+        default: return m;
+    }
 }
 
 void NeuralNetwork::initAdamState() {
     const size_t L = mLayers.size();
-    mMW.assign(L, DynamicMatrix(1,1));
-    mVW.assign(L, DynamicMatrix(1,1));
-    mMB.assign(L, DynamicMatrix(1,1));
-    mVB.assign(L, DynamicMatrix(1,1));
+    mMW.assign(L, MAT(1,1));
+    mVW.assign(L, MAT(1,1));
+    mMB.assign(L, MAT(1,1));
+    mVB.assign(L, MAT(1,1));
     for (size_t l = 0; l < L; l++) {
         const size_t r = mLayers[l].weights.Rows();
         const size_t c = mLayers[l].weights.Cols();
         const size_t numB = mLayers[l].biases.Rows();
-        mMW[l] = DynamicMatrix(r, c);
-        mVW[l] = DynamicMatrix(r, c);
-        mMB[l] = DynamicMatrix(numB, 1);
-        mVB[l] = DynamicMatrix(numB, 1);
+        mMW[l] = MAT(r, c);
+        mVW[l] = MAT(r, c);
+        mMB[l] = MAT(numB, 1);
+        mVB[l] = MAT(numB, 1);
     }
     mT = 0;
 }
 
 // forward pass and return all activations
-std::vector<DynamicMatrix> NeuralNetwork::ForwardAll(const DynamicMatrix& input) const {
-    // init activations
-    std::vector<DynamicMatrix> acts;
+MATVEC NeuralNetwork::ForwardAll(const MAT& input) const {
+    MATVEC acts;
     acts.reserve(mLayers.size() + 1);
-    // input is first activation
-    acts.push_back(input);
-    // for each layer
+    acts.emplace_back(input);
     for (const auto& layer : mLayers) {
-        // push back result of forward pass with previous activation as input
-        acts.push_back(layer.forward(acts.back()));
+        acts.emplace_back(layer.forward(acts.back()));
     }
     return acts;
 }
 
 // forward pass
-DynamicMatrix NeuralNetwork::forward(const DynamicMatrix& input) const {
-    if (mLayers.empty()) {
-        throw std::runtime_error("NeuralNetwork has no layers");
-    }
-    DynamicMatrix current = input;
+MAT NeuralNetwork::forward(const MAT& input) const {
+    MAT curr = input;
     for (const auto& layer : mLayers) {
-        current = layer.forward(current);
+        curr = layer.forward(curr);
     }
-    return current;
+    return curr;
 }
 
 void NeuralNetwork::Save(const std::string& path) const {
@@ -169,7 +191,7 @@ void NeuralNetwork::Load(const std::string& path) {
         uint32_t wc;
         f.read(reinterpret_cast<char*>(&wr), 4);
         f.read(reinterpret_cast<char*>(&wc), 4);
-        DynamicMatrix weights(wr, wc);
+        MAT weights(wr, wc);
         for (size_t r = 0; r < wr; r++)
             for (size_t c = 0; c < wc; c++) {
                 float v;
@@ -179,7 +201,7 @@ void NeuralNetwork::Load(const std::string& path) {
 
         uint32_t br;
         f.read(reinterpret_cast<char*>(&br), 4);
-        DynamicMatrix biases(br, 1);
+        MAT biases(br, 1);
         for (size_t r = 0; r < br; r++) {
             float v;
             f.read(reinterpret_cast<char*>(&v), 4);
@@ -195,139 +217,137 @@ void NeuralNetwork::Load(const std::string& path) {
     initAdamState();
 }
 
-
-TrainSnapshot NeuralNetwork::TrainStep(const DynamicMatrix& input,
-                                       const DynamicMatrix& target,
-                                       const float lr, const float l1)
-{
-    const size_t L = mLayers.size();
-
-    // FORWARD
-    // full vectors of Zs and Activations
-    std::vector<DynamicMatrix> Z; Z.reserve(L);
-    std::vector<DynamicMatrix> A; A.reserve(L + 1);
-    A.push_back(input);
-    for (const auto&[weights, biases, activation] : mLayers) {
-        DynamicMatrix z = weights * A.back() + biases;
-        Z.push_back(z);
-        if (activation == Activation::Softmax)
-            A.push_back(softmax(z));
-        else if (activation == Activation::Tanh)
-            A.push_back(z.Apply(tanhAct));
-        else
-            A.push_back(z.Apply(activation == Activation::Sigmoid ? sigmoid : relu));
+std::pair<MATVEC, MATVEC> NeuralNetwork::TrainForward(const MAT& input) const {
+    MATVEC Z;
+    MATVEC A;
+    Z.reserve(mLayers.size());
+    A.reserve(mLayers.size() + 1);
+    A.emplace_back(input);
+    for (const auto& [weights, biases, activation] : mLayers) {
+        Z.emplace_back(weights * A.back() + biases);
+        A.emplace_back(Activate(Z.back(), activation));
     }
+    return {std::move(Z), std::move(A)};
+}
 
-    // Cross Entropy Loss
-    float loss = 0.0f;
-    for (size_t i = 0; i < A.back().Rows(); i++) {
-        const float a = std::max(A.back().at(i, 0), 1e-7f);
-        // expecting Target_i, seeing A_i (juiced by log)...
-        // since we expect 0 everywhere but one spot, we just get log(a[correctIdx])
-        loss -= target.at(i, 0) * std::log(a);
+float NeuralNetwork::CrossEntropyLoss(const MAT &result, const MAT &target) {
+    std::vector<int> indices(result._data().size());
+    std::iota(indices.begin(), indices.end(), 0);
+    return std::accumulate(indices.begin(), indices.end(), 0.0f, [&result, &target](const float ls, const int idx) {
+        const float a = std::max(result.at(idx, 0), 1e-7f);
+         // expecting Target_i, seeing A_i (juiced by log)...
+         // since we expect 0 everywhere but one spot, we just get log(a[correctIdx])
+         return ls - target.at(idx, 0) * std::log(a);
+    });
+}
+
+void NeuralNetwork::L1(MATVEC& dW, float& loss, const float l1) {
+    if (l1 > 0.0f) {
+        for (MAT& m : dW) {
+            for (auto& w : m._data()) {
+                loss += l1 * std::fabs(w);
+                w += l1 * (w > 0.0f ? 1.0f : w < 0.0f ? -1.0f : 0.0f);
+            }
+        }
     }
+}
 
-    // BACKWARD
-    std::vector deltas(L, DynamicMatrix(1, 1));
-    std::vector dW(L,     DynamicMatrix(1, 1));
-    std::vector dB(L,     DynamicMatrix(1, 1));
+std::tuple<MATVEC, MATVEC, MATVEC> NeuralNetwork::TrainBackward(const size_t L, const MATVEC& Z, const MATVEC& A, const MAT& target)const {
+    std::vector deltas(L, MAT(1, 1));
+    std::vector dW(L,     MAT(1, 1));
+    std::vector dB(L,     MAT(1, 1));
 
     // output layer: CEL gradient is just A - Y...that means delta[targIdx] = A[targIdx] - 1, which is negative
-    deltas[L-1] = A[L] - target;
+    deltas.back() = A[L] - target; // A has L+1 elements, where [0] is input, [L] is final softmax activation
 
     // fundamental operation in backprop: dW_i = gradient * A_i-1
-    // z = W_i * A_i-1
-    // gradient already takes activation = act(z) and actPrime into account
-    // so gradient wrt W_i is just chain rule multiplied by A_i-1
-    dW[L-1] = deltas[L-1] * A[L-1].Transpose();
-    dB[L-1] = deltas[L-1];
+    dW.back() = deltas.back() * A[L-1].Transpose(); // [L-1] is activation being fed into final weight layer
+    dB.back() = deltas.back(); // addition, full gradient flow
 
-    for (int l = static_cast<int>(L) - 2; l >= 0; --l) {
-        // dL/dA_i = W_i+1 * gradient_i+1
-        // because gradient_i+1 already has dW_i+1
-        // and z_i+1 = A_i * W_i+1
+    // now propagate backwards
+    for (int l = static_cast<int>(L - 2); l >= 0; --l){ // L - 2 is second to last weight matrix
+        // this is the gradient flowing back
+        // first iter:  l+1 = last WEIGHT/BIAS/GRAD, second-to-last ACTIVATION
+        MAT gradient = mLayers[l+1].weights.Transpose() * deltas[l+1];
 
-        // so we need to bring A_i into the gradient (deltas[])
-        // A_i affects through W_i+1, so we propagate gradient through that
-        DynamicMatrix err = mLayers[l+1].weights.Transpose() * deltas[l+1];
-
-        // then propagate gradient through activation derivatives
+        // here we weigh/scale/gate the gradient by the activation at THIS layer
         switch (mLayers[l].activation) {
             case Activation::Sigmoid:
-                deltas[l] = err.ElemWiseMult(A[l+1].Apply(sigmoidPrime)); break;
-            case Activation::ReLU:
-                deltas[l] = err.ElemWiseMult(Z[l].Apply(reluPrime));      break;
+                // i.e. here gradient is scaled by sigmoidPrime(A-leaving-this-layer)
+                deltas[l] = gradient.ElemWiseMult(A[l+1].Apply(sigmoidPrime)); break;
             case Activation::Tanh:
-                deltas[l] = err.ElemWiseMult(A[l+1].Apply(tanhPrime));    break;
+                deltas[l] = gradient.ElemWiseMult(A[l+1].Apply(tanhPrime));    break;
+            case Activation::ReLU:
+                // ReLU scales gradient depending on Z[l] (ReLU -> A[l+1] loses info from Z[l])
+                deltas[l] = gradient.ElemWiseMult(Z[l].Apply(reluPrime));      break;
             case Activation::Softmax:
-                deltas[l] = softmaxDelta(A[l+1], err);                   break;
+                // softmax in non-end case (rare), we take deriv of A-leaving-this-layer
+                deltas[l] = softmaxDelta(A[l+1], gradient);                   break;
             case Activation::Input: break;
         }
         // then fundamental operation in backprop: dW_i = gradient * A_i-1
+        // once again, A[l] is activation-feeding-this-layer,
+        //      but dW/deltas[l] is THIS weight/gradient coming back to this layer
         dW[l] = deltas[l] * A[l].Transpose();
         dB[l] = deltas[l];
     }
 
-    // L1 reg
-    if (l1 > 0.0f) {
-        for (size_t l = 0; l < L; l++) {
-            for (size_t r = 0; r < dW[l].Rows(); r++) {
-                for (size_t c = 0; c < dW[l].Cols(); c++) {
-                    // add to loss l1_constant * |weight|
-                    const float w = mLayers[l].weights.at(r, c);
-                    loss += l1 * std::fabs(w);
-                    dW[l].at(r, c) += l1 * (w > 0.0f ? 1.0f : (w < 0.0f ? -1.0f : 0.0f));
-                }
-            }
-        }
-    }
+    return std::make_tuple(deltas, dW, dB);
+}
 
-    // ADAM
-    constexpr float fMomentW = 0.9f, sMomentW = 0.999f, eps = 1e-8f;
+void NeuralNetwork::Adam(const size_t L, const float lr, const MATVEC& dW, const MATVEC& dB) {
+#define PARAM_SETS std::vector<std::tuple<std::vector<float>&, const std::vector<float>&, std::vector<float>&, std::vector<float>&>> \
+    {{mLayers[l].weights._data(), dW[l]._data(), mMW[l]._data(), mVW[l]._data()},\
+    {mLayers[l].biases._data(),  dB[l]._data(), mMB[l]._data(), mVB[l]._data()}}
 
     mT++;
-    const float correction1 = 1.0f / (1.0f - static_cast<float>(std::pow(fMomentW, mT)));
-    const float correction2 = 1.0f / (1.0f - static_cast<float>(std::pow(sMomentW, mT)));
+    const float mCorr = 1.0f / (1.0f - static_cast<float>(std::pow(mMoment1W, mT)));
+    const float vCorr = 1.0f / (1.0f - static_cast<float>(std::pow(mMoment2W, mT)));
 
     for (size_t l = 0; l < L; l++) {
-        // weights
-        for (size_t r = 0; r < mLayers[l].weights.Rows(); r++) {
-            for (size_t c = 0; c < mLayers[l].weights.Cols(); c++) {
-                // get value
-                const float val = dW[l].at(r, c);
-                // get smoothed average of raw val history (captures direction)
-                const float newFMoment = fMomentW * mMW[l].at(r,c) + (1.0f - fMomentW) * val;
-                // get smoothed average of squared val history (captures magnitude)
-                const float newSMoment = sMomentW * mVW[l].at(r,c) + (1.0f - sMomentW) * val * val;
-                mMW[l].at(r,c) = newFMoment;
-                mVW[l].at(r,c) = newSMoment;
-                const float mHat = newFMoment * correction1;
-                const float vHat = newSMoment * correction2;
+        for (auto& [params, grads, m, v] : PARAM_SETS) {
+            for (size_t i = 0; i < params.size(); i++) {
+                const float newM1 = m[i] * mMoment1W + mInvMoment1W * grads[i];
+                const float newM2 = v[i] * mMoment2W + mInvMoment2W * grads[i] * grads[i];
 
-                // effective step = lr * (smoothed direction) / (sqrt(steepness history) + eps)
-                // weights with consistent gradients step boldly
-                // noisy/steep ones tread carefully
-                mLayers[l].weights.at(r,c) -= lr * mHat / (std::sqrt(vHat) + eps);
+                m[i] = newM1;
+                v[i] = newM2;
+
+                const float mHat = newM1 * mCorr;
+                const float vHat = newM2 * vCorr;
+                params[i] -= lr * mHat / (std::sqrt(vHat) + eps);
             }
         }
-        // biases
-        for (size_t r = 0; r < mLayers[l].biases.Rows(); r++) {
-            const float val = dB[l].at(r, 0);
-            const float newFMoment = fMomentW * mMB[l].at(r,0) + (1.0f - fMomentW) * val;
-            const float newSMoment = sMomentW * mVB[l].at(r,0) + (1.0f - sMomentW) * val * val;
-            mMB[l].at(r,0) = newFMoment;
-            mVB[l].at(r,0) = newSMoment;
-            const float mHat = newFMoment * correction1;
-            const float vHat = newSMoment * correction2;
-            mLayers[l].biases.at(r,0) -= lr * mHat / (std::sqrt(vHat) + eps);
-        }
     }
+#undef PARAM_SETS
+}
 
-    // return snapshot for viz
-    return { A, deltas, dW, loss };
+TrainSnapshot NeuralNetwork::TrainStep(const MAT &input, const MAT &target, float lr, float l1) {
+    const size_t L = mLayers.size();
+
+    // FORWARD PASS
+    const auto [Z, A] = TrainForward(input);
+
+    // LOSS
+    auto loss = CrossEntropyLoss(A.back(), target);
+
+    // BACKWARD PASS
+    auto [deltas, dW, dB] = TrainBackward(L, Z, A, target);
+
+    // L1
+    L1(dW, loss, l1);
+
+    // UPDATE (Adam)
+    Adam(L, lr, dW, dB);
+
+
+    return {A, deltas, dW, loss};
 }
 
 void NeuralNetwork::operator<<(std::ostream& os) const {
     for (const auto& l : mLayers)
         os << l.weights.Rows() << "x" << l.weights.Cols() << "(" << ActivationName(l.activation) << ")\n";
 }
+
+#undef MAT
+#undef MATVEC
