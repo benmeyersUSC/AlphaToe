@@ -2,6 +2,8 @@
 #include <array>
 #include <vector>
 #include <cstdint>
+#include "../cppNN/DynamicMatrix.h"
+
 
 // Squares are indexed 0-8, row-major:
 //   0 | 1 | 2
@@ -17,7 +19,7 @@ inline Player opponent(Player p) { return p == Player::X ? Player::O : Player::X
 inline Cell   playerCell(Player p) { return p == Player::X ? Cell::X : Cell::O; }
 
 struct GameState {
-    std::array<Cell, 9> board{};  // zero-initialized → all Empty
+    std::array<Cell, 9> board{};  // all Empty
 
     Cell  at(int sq) const        { return board[sq]; }
     void  set(int sq, Player p)   { board[sq] = playerCell(p); }
@@ -30,7 +32,7 @@ struct GameState {
     [[nodiscard]] GameState apply(int sq, Player p) const;
 
     // encodes for NN: 1.0 is me, -1.0 is opp
-    std::array<float, 9> toNNInput(Player p) const;
+    static DynamicMatrix toNNInput(const GameState& s, Player p) ;
 
     bool operator==(const GameState& o) const { return board == o.board; }
 };

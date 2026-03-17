@@ -84,8 +84,27 @@ static MAT softmaxDelta(const MAT& a, const MAT& e) {
     return d;
 }
 
-void NeuralNetwork::AddLayer(const size_t inSize, const size_t outSize, const Activation act) {
-    mLayers.push_back({ MAT(outSize, inSize), MAT(outSize, 1), act });
+void NeuralNetwork::XavierInit(MAT& weights, int inSize, int outSize)
+{
+    static std::mt19937 rng(std::random_device{}());
+    float limit = std::sqrt(6.0f / static_cast<float>(inSize + outSize));
+    std::uniform_real_distribution<float> dist(-limit, limit);
+    for (size_t r = 0; r < outSize; r++)
+    {
+        for (size_t c = 0; c < inSize; c++)
+        {
+            weights.at(r, c) = dist(rng);
+        }
+    }
+}
+
+void NeuralNetwork::AddLayer(const size_t outSize, const Activation act) {
+    const size_t inSize = mLayers.empty() ? mInputSize : mLayers.back().weights.Rows();
+    MAT weights(outSize, inSize);
+
+    XavierInit(weights, inSize, outSize);
+
+    mLayers.push_back({ std::move(weights), MAT(outSize, 1), act });
     initAdamState();
 }
 
@@ -192,13 +211,13 @@ void NeuralNetwork::Load(const std::string& path) {
         f.read(reinterpret_cast<char*>(&wr), 4);
         f.read(reinterpret_cast<char*>(&wc), 4);
         MAT weights(wr, wc);
-        for (size_t r = 0; r < wr; r++)
+        for (size_t r = 0; r < wr; r++){
             for (size_t c = 0; c < wc; c++) {
                 float v;
                 f.read(reinterpret_cast<char*>(&v), 4);
                 weights.at(r, c) = v;
             }
-
+}
         uint32_t br;
         f.read(reinterpret_cast<char*>(&br), 4);
         MAT biases(br, 1);
@@ -241,24 +260,29 @@ float NeuralNetwork::CrossEntropyLoss(const MAT &result, const MAT &target) {
     });
 }
 
-void NeuralNetwork::L1(MATVEC& dW, float& loss, const float l1) {
+void NeuralNetwork::L1(MATVEC& dW, const float l1, float* loss) {
     if (l1 > 0.0f) {
         for (MAT& m : dW) {
             for (auto& w : m._data()) {
-                loss += l1 * std::fabs(w);
+                if (loss) *loss += l1 * std::fabs(w);
                 w += l1 * (w > 0.0f ? 1.0f : w < 0.0f ? -1.0f : 0.0f);
             }
         }
     }
 }
 
-std::tuple<MATVEC, MATVEC, MATVEC> NeuralNetwork::TrainBackward(const size_t L, const MATVEC& Z, const MATVEC& A, const MAT& target)const {
+std::tuple<MATVEC, MATVEC, MATVEC> NeuralNetwork::TrainBackward(const size_t L, const MATVEC& Z, const MATVEC& A, const MAT& target) const {
+    // output layer: CEL gradient is just A - Y...that means delta[targIdx] = A[targIdx] - 1, which is negative
+    // A has L+1 elements, where [0] is input, [L] is final softmax activation
+    return TrainBackwardFromDelta(L, Z, A, A[L] - target);
+}
+
+std::tuple<MATVEC, MATVEC, MATVEC> NeuralNetwork::TrainBackwardFromDelta(const size_t L, const MATVEC& Z, const MATVEC& A, const MAT& lastDelta) const {
     std::vector deltas(L, MAT(1, 1));
     std::vector dW(L,     MAT(1, 1));
     std::vector dB(L,     MAT(1, 1));
 
-    // output layer: CEL gradient is just A - Y...that means delta[targIdx] = A[targIdx] - 1, which is negative
-    deltas.back() = A[L] - target; // A has L+1 elements, where [0] is input, [L] is final softmax activation
+    deltas.back() = lastDelta;
 
     // fundamental operation in backprop: dW_i = gradient * A_i-1
     dW.back() = deltas.back() * A[L-1].Transpose(); // [L-1] is activation being fed into final weight layer
@@ -295,17 +319,46 @@ std::tuple<MATVEC, MATVEC, MATVEC> NeuralNetwork::TrainBackward(const size_t L, 
     return std::make_tuple(deltas, dW, dB);
 }
 
+MAT NeuralNetwork::TrainStepFromLastDelta(const MAT& input, const MAT& lastDelta, float lr, float l1) {
+    const size_t L = mLayers.size();
+    const auto [Z, A] = TrainForward(input);
+    auto [deltas, dW, dB] = TrainBackwardFromDelta(L, Z, A, lastDelta);
+    L1(dW, l1);
+    Adam(L, lr, dW, dB);
+    // gradient wrt input = W * delta
+    return mLayers[0].weights.Transpose() * deltas[0];
+}
+
+void NeuralNetwork::TrainStepFromGrad(const MAT& input, const MAT& grad, float lr, float l1) {
+    const size_t L = mLayers.size();
+    const auto [Z, A] = TrainForward(input);
+
+    // convert dL/dA (on the way out of last weight layer) to dL/dZ (on raw output of last weight layer)
+    MAT lastDelta(grad.Rows(), 1);
+    switch (mLayers[L-1].activation) {
+        case Activation::Sigmoid: lastDelta = grad.ElemWiseMult(A[L].Apply(sigmoidPrime)); break;
+        case Activation::Tanh:    lastDelta = grad.ElemWiseMult(A[L].Apply(tanhPrime));    break;
+        case Activation::ReLU:    lastDelta = grad.ElemWiseMult(Z[L-1].Apply(reluPrime));  break;
+        case Activation::Softmax: lastDelta = softmaxDelta(A[L], grad);                    break;
+        default:                  lastDelta = grad;                                        break;
+    }
+
+    auto [deltas, dW, dB] = TrainBackwardFromDelta(L, Z, A, lastDelta);
+    L1(dW, l1);
+    Adam(L, lr, dW, dB);
+}
+
 void NeuralNetwork::Adam(const size_t L, const float lr, const MATVEC& dW, const MATVEC& dB) {
-#define PARAM_SETS std::vector<std::tuple<std::vector<float>&, const std::vector<float>&, std::vector<float>&, std::vector<float>&>> \
-    {{mLayers[l].weights._data(), dW[l]._data(), mMW[l]._data(), mVW[l]._data()},\
-    {mLayers[l].biases._data(),  dB[l]._data(), mMB[l]._data(), mVB[l]._data()}}
+#define PARAM_SETS(layer) std::vector<std::tuple<std::vector<float>&, const std::vector<float>&, std::vector<float>&, std::vector<float>&>> \
+    {{mLayers[layer].weights._data(), dW[layer]._data(), mMW[layer]._data(), mVW[layer]._data()},\
+    {mLayers[layer].biases._data(),  dB[layer]._data(), mMB[layer]._data(), mVB[layer]._data()}}
 
     mT++;
     const float mCorr = 1.0f / (1.0f - static_cast<float>(std::pow(mMoment1W, mT)));
     const float vCorr = 1.0f / (1.0f - static_cast<float>(std::pow(mMoment2W, mT)));
 
     for (size_t l = 0; l < L; l++) {
-        for (auto& [params, grads, m, v] : PARAM_SETS) {
+        for (auto& [params, grads, m, v] : PARAM_SETS(l)) {
             for (size_t i = 0; i < params.size(); i++) {
                 const float newM1 = m[i] * mMoment1W + mInvMoment1W * grads[i];
                 const float newM2 = v[i] * mMoment2W + mInvMoment2W * grads[i] * grads[i];
@@ -335,7 +388,7 @@ TrainSnapshot NeuralNetwork::TrainStep(const MAT &input, const MAT &target, floa
     auto [deltas, dW, dB] = TrainBackward(L, Z, A, target);
 
     // L1
-    L1(dW, loss, l1);
+    L1(dW, l1, &loss);
 
     // UPDATE (Adam)
     Adam(L, lr, dW, dB);

@@ -24,7 +24,8 @@ target_link_libraries(tttcore PRIVATE cppNN)
 # --- AlphaToe player (MCTS + NN) ---
 add_library(alphatoe
     src/ai/MCTSNode.cpp
-    src/ai/AlphaToePlayer.cpp
+    src/ai/AlphaToe.cpp
+    src/ai/Minimax.cpp
 )
 target_include_directories(alphatoe PUBLIC src)
 target_link_libraries(alphatoe PUBLIC tttcore cppNN)

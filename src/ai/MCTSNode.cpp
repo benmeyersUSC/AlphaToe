@@ -1,1 +1,8 @@
-// TODO: implement in next phase
+#include "MCTSNode.h"
+
+MCTSNode::~MCTSNode() {
+    for (auto* child : mChildren)
+    {
+        delete child;
+    }
+}

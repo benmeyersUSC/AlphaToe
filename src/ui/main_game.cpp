@@ -1,8 +1,7 @@
 #include "TerminalUI.h"
 #include "game/GameRules.h"
 #include "ai/Minimax.h"
-// AlphaToePlayer will be included once built
-// #include "ai/AlphaToePlayer.h"
+#include "ai/AlphaToe.h"
 
 #include <iostream>
 
@@ -10,6 +9,7 @@
 static GameResult playGame(Player humanPlayer, bool vsAlphaToe) {
     GameState state;
     Player current = Player::X;  // X always goes first
+    AlphaToe alphaToe;           // constructed once (loads weights if available)
 
     while (true) {
         TerminalUI::printBoard(state);
@@ -21,8 +21,7 @@ static GameResult playGame(Player humanPlayer, bool vsAlphaToe) {
         } else {
             std::cout << "AI is thinking...\n";
             if (vsAlphaToe) {
-                // TODO: replace with AlphaToePlayer once implemented
-                sq = Minimax::bestMove(state, current);
+                sq = alphaToe.bestMove(state, current);
             } else {
                 sq = Minimax::bestMove(state, current);
             }
@@ -44,10 +43,10 @@ static GameResult playGame(Player humanPlayer, bool vsAlphaToe) {
 int main() {
     int mode         = TerminalUI::mainMenu();
     Player humanSide = TerminalUI::chooseSide();
-    bool vsAlphaToe  = (mode == 2);
+    bool vsAlphaToe  = mode == 2;
 
-    if (vsAlphaToe)
-        std::cout << "\nNote: AlphaToe player not yet trained — falling back to Minimax.\n";
+    if (vsAlphaToe){
+        std::cout << "\nNote: AlphaToe player not yet trained — falling back to Minimax.\n";}
 
     playGame(humanSide, vsAlphaToe);
 

@@ -45,6 +45,7 @@ static MAT Activate(const MAT& m, Activation a);
 
 class NeuralNetwork {
     std::vector<Layer> mLayers;
+    size_t mInputSize = 0;
 
     // Adam state, moments for each weight and bias
     MATVEC mMW, mVW;  // weight moments
@@ -54,16 +55,24 @@ class NeuralNetwork {
     static constexpr float mInvMoment1W = 1.0f - mMoment1W, mInvMoment2W = 1.0f - mMoment2W;
 
     void initAdamState();
-    [[nodiscard]] std::pair<MATVEC, MATVEC> TrainForward(const MAT& input)const ;
-    static float CrossEntropyLoss(const MAT& result, const MAT& target) ;
-    [[nodiscard]] std::tuple<MATVEC, MATVEC, MATVEC> TrainBackward( size_t L, const MATVEC& Z, const MATVEC& A, const MAT& target)const ;
-    static void L1(MATVEC&, float& loss, float l1);
-    void Adam(size_t L, float lr, const MATVEC& dW, const MATVEC& dB);
-public:
-    NeuralNetwork() = default;
+    [[nodiscard]] std::pair<MATVEC, MATVEC> TrainForward(const MAT& input) const;
 
-    // inSize must match previous layer's outSize
-    void AddLayer(size_t inSize, size_t outSize, Activation act);
+    // CEL variant: computes lastDelta = A[L] - target, then calls general
+    [[nodiscard]] std::tuple<MATVEC, MATVEC, MATVEC> TrainBackward(size_t L, const MATVEC& Z, const MATVEC& A, const MAT& target) const;
+
+    // General backward: starts from a pre-computed last-layer delta 
+    [[nodiscard]] std::tuple<MATVEC, MATVEC, MATVEC> TrainBackwardFromDelta(size_t L, const MATVEC& Z, const MATVEC& A, const MAT& lastDelta) const;
+
+    static void L1(MATVEC&, float l1,  float* loss = nullptr);
+    void Adam(size_t L, float lr, const MATVEC& dW, const MATVEC& dB);
+    void XavierInit(MAT& weights, int inSize, int outSize);
+public:
+    static float CrossEntropyLoss(const MAT& result, const MAT& target);
+
+    NeuralNetwork() = default;
+    explicit NeuralNetwork(size_t inputSize) : mInputSize(inputSize) {}
+
+    void AddLayer(size_t outSize, Activation act);
 
     // binary serialization of entire class
     void Save(const std::string& path) const;
@@ -80,6 +89,14 @@ public:
     // train one step of CE Loss, Adam optimized, with optional L1 reg
     // returns TrainSnapshot object {vector: activations, vector: deltas, vector: weightGradients, float: loss}
     TrainSnapshot TrainStep(const MAT& input, const MAT& target, float lr, float l1 = 0.0f);
+
+    // backward pass + Adam update from a given gradient (lastDelta)
+    // returns gradient wrt input
+    MAT TrainStepFromLastDelta(const MAT& input, const MAT& lastDelta, float lr, float l1 = 0.0f);
+
+    // Train the trunk given ∂L/∂output (merged gradient from heads).
+    // Converts to last-layer delta internally via activation derivative.
+    void TrainStepFromGrad(const MAT& input, const MAT& grad, float lr, float l1 = 0.0f);
 
     void operator<<(std::ostream& os) const;
 };

@@ -182,6 +182,7 @@ class AlphaToe:
 		
 		best_ind = ucb_scores.index(max(ucb_scores))
 		return currNode.mChildren[best_ind]
+	
 	def backup(self, path, leaf_value):
 		"""
 		Backup values through the search path
