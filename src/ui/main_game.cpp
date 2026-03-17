@@ -4,6 +4,26 @@
 #include "ai/AlphaToe.h"
 
 #include <iostream>
+#include <chrono>
+#include <string>
+#include <sstream>
+#include <functional>
+
+template <typename F>
+std::string timed(F&& f) {
+    auto start = std::chrono::high_resolution_clock::now();
+    f();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    std::ostringstream os;
+    if (us < 1000)
+        os << us << " μs";
+    else if (us < 1'000'000)
+        os << us / 1000.0 << " ms";
+    else
+        os << us / 1'000'000.0 << " s";
+    return os.str();
+}
 
 // Play one game. Returns the result.
 static GameResult playGame(Player humanPlayer, bool vsAlphaToe) {
@@ -21,7 +41,8 @@ static GameResult playGame(Player humanPlayer, bool vsAlphaToe) {
         } else {
             std::cout << "AI is thinking...\n";
             if (vsAlphaToe) {
-                sq = alphaToe.bestMove(state, current);
+                auto t = timed ([&](){sq = alphaToe.bestMove(state, current);});
+                std::cout << t << "\n2";
             } else {
                 sq = Minimax::bestMove(state, current);
             }

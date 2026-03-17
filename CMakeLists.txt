@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(AlphaToe CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- shared neural network library ---
@@ -35,6 +35,7 @@ add_executable(alphatoe_train
     src/train/main_train.cpp
     src/train/SelfPlay.cpp
     src/train/TrainingLoop.cpp
+    src/train/ReplayBuffer.cpp
 )
 target_link_libraries(alphatoe_train PRIVATE alphatoe tttcore cppNN)
 

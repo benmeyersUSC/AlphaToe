@@ -5,17 +5,24 @@
 #include <stdexcept>
 #include <functional>
 #include <numeric>
+#include <iostream>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 static constexpr float C = 1.8f;
-static const std::string kModelPath = "models/alphatoe";
+static const std::string kModelPath = "../models/alphatoe";
 
 AlphaToe::AlphaToe() : mNet(9) {
     try {
         mNet.Load(kModelPath);  
+        std::cout << "loaded model\n";
     } catch (...) {
-        mNet.AddLayer(64, Activation::ReLU,    Branch::Trunk);
-        mNet.AddLayer(32, Activation::ReLU,    Branch::Trunk);
+        std::cout << "couldn't load model\n";
+        mNet.AddLayer(54, Activation::ReLU,    Branch::Trunk);
+        mNet.AddLayer(27, Activation::ReLU,    Branch::Trunk);
+        mNet.AddLayer(27,  Activation::ReLU, Branch::Policy);
         mNet.AddLayer(9,  Activation::Softmax, Branch::Policy);
+        mNet.AddLayer(27,  Activation::ReLU,    Branch::Value);
         mNet.AddLayer(1,  Activation::Tanh,    Branch::Value);
     }
 }
@@ -103,18 +110,17 @@ void AlphaToe::backup(const std::vector<std::pair<MCTSNode*, int>>& path, const 
     }
 }
 
-int AlphaToe::bestMove(const GameState& state, const Player player, const int simulations) const {
+AlphaToe::MoveResult AlphaToe::pickMove(const GameState& state, const Player player, const int simulations) const {
     auto* root = new MCTSNode(state);
 
     for (int sim = 0; sim < simulations; sim++) {
         std::vector<std::pair<MCTSNode*, int>> path;  // {node, square num taken from node}
 
-        MCTSNode* node   = root;
+        MCTSNode* node    = root;
         Player currPlayer = player;
 
         // while node has been expanded and isn't terminal, traverse and fill path
         while (node->mExpanded && !GameRules::isTerminal(node->mState)) {
-            // use ucb1 to choose best move/node at each node
             auto [child, sq] = ucb1(node);
             path.emplace_back(node, sq);
             node = child;
@@ -122,56 +128,59 @@ int AlphaToe::bestMove(const GameState& state, const Player player, const int si
         }
 
         float value;
-        // if we stopped for terminal, get score
         if (GameRules::isTerminal(node->mState)) {
-            // we've reached terminal node, so get objective score
             value = GameRules::score(node->mState, currPlayer);
-        }
-        // otherwise we have to expand and pick a new leaf
-        else 
-        {
-            // expand: run network, add all children, descend to best child
+        } else {
             auto [bestChild, bestSq] = expand(node, currPlayer);
-
             path.emplace_back(node, bestSq);
             node = bestChild;
             currPlayer = opponent(currPlayer);
 
-            // evaluate the child with the network (or terminal score)
-            if (GameRules::isTerminal(node->mState))
-            {
+            if (GameRules::isTerminal(node->mState)) {
                 value = GameRules::score(node->mState, currPlayer);
-            }
-            else
-            {
+            } else {
                 auto [_, valueOut] = mNet.Forward(GameState::toNNInput(node->mState, currPlayer));
                 value = valueOut.at(0, 0);
             }
         }
 
-        // propagate value back up path
         backup(path, value);
     }
 
-    // pick the move with the highest visit count
-    const auto legal = state.legalMoves();
-    int bestSq = legal[0];
-    int bestN = -1;
-    for (const int sq : legal) {
-        if (root->mVisitCounts[sq] > bestN)
-        {
-            bestN = root->mVisitCounts[sq];
+    // build normalized visit distribution over all 9 squares
+    std::array<float, 9> visitDist{};
+    float total = static_cast<float>(root->mTotalVisits);
+    int bestSq  = state.legalMoves()[0];
+    int bestN   = -1;
+    for (int sq : state.legalMoves()) {
+        visitDist[sq] = total > 0.0f ? root->mVisitCounts[sq] / total : 0.0f;
+        if (root->mVisitCounts[sq] > bestN) {
+            bestN  = root->mVisitCounts[sq];
             bestSq = sq;
         }
     }
 
-    // clear whole tree
     delete root;
+    return { bestSq, visitDist };
+}
 
-    // move!
-    return bestSq;
+int AlphaToe::bestMove(const GameState& state, const Player player, const int simulations) const {
+    return pickMove(state, player, simulations).move;
 }
 
 
-void AlphaToe::save(const std::string& path) const { mNet.Save(path); }
+float AlphaToe::trainStep(const DynamicMatrix& board,
+                          const DynamicMatrix& policy,
+                          const DynamicMatrix& value,
+                          float lr,
+                          float policyWeight,
+                          float valueWeight)
+{
+    return mNet.TrainStep(board, policy, value, lr, policyWeight, valueWeight);
+}
+
+void AlphaToe::save(const std::string& path) const {
+    fs::create_directories(fs::path(path).parent_path());
+    mNet.Save(path);
+}
 void AlphaToe::load(const std::string& path)       { mNet.Load(path); }

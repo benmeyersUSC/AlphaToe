@@ -23,8 +23,23 @@ class AlphaToe {
 public:
     AlphaToe();
 
-    // Best move via MCTS + NN. Returns square 0-8.
-    int bestMove(const GameState& state, Player player, int simulations = 540) const;
+    // Full MCTS result: best move + normalized visit distribution (policy training target)
+    struct MoveResult {
+        int move;
+        std::array<float, 9> visitDist;  // sums to 1 over legal moves
+    };
+    MoveResult pickMove(const GameState& state, Player player, int simulations = 270) const;
+
+    // Convenience wrapper — just the move
+    int bestMove(const GameState& state, Player player, int simulations = 270) const;
+
+    // Single training step on one sample. Returns combined loss.
+    float trainStep(const DynamicMatrix& board,
+                    const DynamicMatrix& policy,
+                    const DynamicMatrix& value,
+                    float lr,
+                    float policyWeight = 1.0f,
+                    float valueWeight  = 1.0f);
 
     void save(const std::string& path) const;
     void load(const std::string& path);
