@@ -25,10 +25,12 @@ std::vector<GameSample> SelfPlay::run(const AlphaToe& ai, int numGames, int simu
         while (!GameRules::isTerminal(state)) {
             auto [move, visitDist] = ai.pickMove(state, current, simulations);
 
-            // encode board from current player's perspective
-            DynamicMatrix input = GameState::toNNInput(state, current);
+            // encode board from current player's perspective: own → +1, opp → -1, empty → 0
             std::array<float, 9> board{};
-            for (int i = 0; i < 9; i++) board[i] = input.at(i, 0);
+            const Cell mine = playerCell(current);
+            for (int i = 0; i < 9; i++)
+                board[i] = state.board[i] == Cell::Empty ? 0.f
+                         : state.board[i] == mine        ? 1.f : -1.f;
 
             game.push_back({ board, visitDist, current });
             state   = state.apply(move, current);

@@ -11,7 +11,6 @@ int main() {
     const int    epochs        = 10;
     const size_t batchSize     = 256;
     const float  lr            = 0.001f;
-    const std::string modelPath  = "../models/alphatoe";
     const std::string bufferPath = "../data/replay_buffer.bin";
 
     std::cout << "AlphaToe trainer\n";
@@ -40,9 +39,7 @@ int main() {
         float loss = TrainingLoop::run(ai, buffer, batchSize, epochs, lr);
         std::cout << "  final avg loss: " << loss << "\n\n";
 
-        // save model
-        ai.save(modelPath);
-        std::cout << "  model saved -> " << modelPath << "\n\n";
+        // model save omitted — call ai.save(path) explicitly when ready to persist
     }
 
     std::cout << "Done.\n";

@@ -1,7 +1,7 @@
 #pragma once
 #include "game/GameState.h"
 #include "MCTSNode.h"
-#include "TwoHeadedNetwork.h"
+#include "TwoHeadedNet.hpp"
 #include <vector>
 #include <string>
 
@@ -21,25 +21,26 @@ class AlphaToe {
     static void backup(const std::vector<std::pair<MCTSNode*, int>>& path, float leafValue);
 
 public:
-    AlphaToe();
+    AlphaToe() = default;
 
     // Full MCTS result: best move + normalized visit distribution (policy training target)
     struct MoveResult {
         int move;
         std::array<float, 9> visitDist;  // sums to 1 over legal moves
     };
-    MoveResult pickMove(const GameState& state, Player player, int simulations = 270) const;
+    [[nodiscard]] MoveResult pickMove(const GameState& state, Player player, int simulations = 270) const;
 
     // Convenience wrapper — just the move
-    int bestMove(const GameState& state, Player player, int simulations = 270) const;
+    [[nodiscard]] int bestMove(const GameState& state, Player player, int simulations = 270) const;
 
     // Single training step on one sample. Returns combined loss.
-    float trainStep(const DynamicMatrix& board,
-                    const DynamicMatrix& policy,
-                    const DynamicMatrix& value,
-                    float lr,
-                    float policyWeight = 1.0f,
-                    float valueWeight  = 1.0f);
+    // board/policy are raw float[9]; value is a scalar outcome in [-1, 1].
+    float trainStep(const float* board,
+                    const float* policy,
+                    float        value,
+                    float        lr,
+                    float        policyWeight = 1.0f,
+                    float        valueWeight  = 1.0f);
 
     void save(const std::string& path) const;
     void load(const std::string& path);

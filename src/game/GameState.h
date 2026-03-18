@@ -2,7 +2,6 @@
 #include <array>
 #include <vector>
 #include <cstdint>
-#include "../cppNN/DynamicMatrix.h"
 
 
 // Squares are indexed 0-8, row-major:
@@ -30,9 +29,6 @@ struct GameState {
 
     // place p's mark on sq
     [[nodiscard]] GameState apply(int sq, Player p) const;
-
-    // encodes for NN: 1.0 is me, -1.0 is opp
-    static DynamicMatrix toNNInput(const GameState& s, Player p) ;
 
     bool operator==(const GameState& o) const { return board == o.board; }
 };

@@ -4,13 +4,9 @@ project(AlphaToe CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# --- shared neural network library ---
-add_library(cppNN
-    cppNN/DynamicMatrix.cpp
-    cppNN/NeuralNetwork.cpp
-    cppNN/TwoHeadedNetwork.cpp
-)
-target_include_directories(cppNN PUBLIC cppNN)
+# --- shared neural network library (header-only: Tensor.hpp + NeuralNet.hpp) ---
+add_library(cppNN INTERFACE)
+target_include_directories(cppNN INTERFACE cppNN)
 
 # --- core TTT game library ---
 add_library(tttcore
@@ -19,7 +15,6 @@ add_library(tttcore
     src/ai/Minimax.cpp
 )
 target_include_directories(tttcore PUBLIC src)
-target_link_libraries(tttcore PRIVATE cppNN)
 
 # --- AlphaToe player (MCTS + NN) ---
 add_library(alphatoe

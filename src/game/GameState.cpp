@@ -14,13 +14,3 @@ GameState GameState::apply(int sq, Player p) const {
     return next;
 }
 
- DynamicMatrix GameState::toNNInput(const GameState& s, Player p)  {
-    DynamicMatrix numericBoard(9,1);
-    Cell mine = playerCell(p);
-    for (int i = 0; i < 9; i++) {
-        if (s.board[i] == Cell::Empty)    numericBoard.at(i,0) =  0.0f;
-        else if (s.board[i] == mine)      numericBoard.at(i,0) =  1.0f;
-        else                            numericBoard.at(i,0) = -1.0f;
-    }
-    return numericBoard;
-}

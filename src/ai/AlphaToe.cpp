@@ -10,38 +10,28 @@
 namespace fs = std::filesystem;
 
 static constexpr float C = 1.8f;
-static const std::string kModelPath = "../models/alphatoe";
 
-AlphaToe::AlphaToe() : mNet(9) {
-    try {
-        mNet.Load(kModelPath);  
-        std::cout << "loaded model\n";
-    } catch (...) {
-        std::cout << "couldn't load model\n";
-        mNet.AddLayer(54, Activation::ReLU,    Branch::Trunk);
-        mNet.AddLayer(27, Activation::ReLU,    Branch::Trunk);
-        mNet.AddLayer(27,  Activation::ReLU, Branch::Policy);
-        mNet.AddLayer(9,  Activation::Softmax, Branch::Policy);
-        mNet.AddLayer(27,  Activation::ReLU,    Branch::Value);
-        mNet.AddLayer(1,  Activation::Tanh,    Branch::Value);
-    }
+// Encode board from a player's perspective: own pieces → +1, opp → -1, empty → 0.
+static Tensor<9> toTensor(const GameState& s, Player p) {
+    Tensor<9> t;
+    const Cell mine = playerCell(p);
+    for (size_t i = 0; i < 9; ++i)
+        t.flat(i) = s.board[i] == Cell::Empty ? 0.f
+                  : s.board[i] == mine        ? 1.f : -1.f;
+    return t;
 }
 
 std::pair<MCTSNode*,int> AlphaToe::expand(MCTSNode* node, Player player) const {
     // get policy from this node per this player
-    TwoHeadedOutput out  = mNet.Forward(GameState::toNNInput(node->mState, player));
+    TwoHeadedOutput out  = mNet.Forward(toTensor(node->mState, player));
     auto& policyOut = out.policy;
 
     // legal move indices
     auto legal = node->mState.legalMoves();
 
     // renormalize policy probabilities over legal moves
-    float sum = std::accumulate(legal.begin(), legal.end(), 0.0f, 
-        [&policyOut](const float sm, const int idx)
-        {
-            return sm + policyOut.at(idx, 0);
-        }
-    );
+    float sum = 0.f;
+    for (int sq : legal) sum += policyOut.flat(sq);
 
     int bestSq = legal[0];
     float bestProb = -1.0f;
@@ -50,10 +40,10 @@ std::pair<MCTSNode*,int> AlphaToe::expand(MCTSNode* node, Player player) const {
     for (int sq : legal) {
         // add child node
         node->mChildren[sq] = new MCTSNode(node->mState.apply(sq, player));
-        float prob = (sum > 0.0f) ? policyOut.at(sq, 0) / sum : 1.0f / static_cast<float>(legal.size());
-        if (prob > bestProb) 
-        { 
-            bestProb = prob; 
+        float prob = (sum > 0.0f) ? policyOut.flat(sq) / sum : 1.0f / static_cast<float>(legal.size());
+        if (prob > bestProb)
+        {
+            bestProb = prob;
             bestSq = sq;
         }
     }
@@ -139,8 +129,8 @@ AlphaToe::MoveResult AlphaToe::pickMove(const GameState& state, const Player pla
             if (GameRules::isTerminal(node->mState)) {
                 value = GameRules::score(node->mState, currPlayer);
             } else {
-                auto [_, valueOut] = mNet.Forward(GameState::toNNInput(node->mState, currPlayer));
-                value = valueOut.at(0, 0);
+                auto out = mNet.Forward(toTensor(node->mState, currPlayer));
+                value = out.value.flat(0);
             }
         }
 
@@ -168,19 +158,23 @@ int AlphaToe::bestMove(const GameState& state, const Player player, const int si
     return pickMove(state, player, simulations).move;
 }
 
-
-float AlphaToe::trainStep(const DynamicMatrix& board,
-                          const DynamicMatrix& policy,
-                          const DynamicMatrix& value,
-                          float lr,
-                          float policyWeight,
-                          float valueWeight)
+float AlphaToe::trainStep(const float* board,
+                          const float* policy,
+                          float        value,
+                          float        lr,
+                          float        policyWeight,
+                          float        valueWeight)
 {
-    return mNet.TrainStep(board, policy, value, lr, policyWeight, valueWeight);
+    Tensor<9> boardT, policyT;
+    for (size_t i = 0; i < 9; ++i) { boardT.flat(i) = board[i]; policyT.flat(i) = policy[i]; }
+    Tensor<1> valueT;
+    valueT.flat(0) = value;
+
+    return mNet.TrainStep(boardT, policyT, valueT, lr, policyWeight, valueWeight);
 }
 
 void AlphaToe::save(const std::string& path) const {
     fs::create_directories(fs::path(path).parent_path());
-    mNet.Save(path);
+    mNet.save(path);
 }
-void AlphaToe::load(const std::string& path)       { mNet.Load(path); }
+void AlphaToe::load(const std::string& path) { mNet.load(path); }

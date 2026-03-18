@@ -5,6 +5,7 @@
 #include <numeric>
 #include <type_traits>
 
+namespace tensor{
 
 // TENSOR DIMENSIONS PRODUCT
 // templatized dimension list --> product (for Tensor underlying array size)
@@ -26,19 +27,19 @@ struct TensorDimsProduct<First, Rest...> {
 
 // GET DIMENSION FROM TENSOR DIMENSIONS LIST
 template <size_t N, size_t... Ds>
-struct DimGet;
+struct SizeTemplateGet;
 
 // base case: first element
 template<size_t First, size_t... Rest>
-struct DimGet<0, First, Rest...> {
+struct SizeTemplateGet<0, First, Rest...> {
     static constexpr size_t value = First;
 };
 
 // recursive case
 template<size_t N, size_t First, size_t... Rest>
-struct DimGet<N, First, Rest...> {
+struct SizeTemplateGet<N, First, Rest...> {
     // peel off, ditch first, until N = 0
-    static constexpr size_t value = DimGet<N - 1, Rest...>::value;
+    static constexpr size_t value = SizeTemplateGet<N - 1, Rest...>::value;
 };
 
 
@@ -119,11 +120,39 @@ public:
 
     // get underlying array
     float* data() {return data_.data();}
-    const float* data() const {return data_.data();}
+    [[nodiscard]] const float* data() const {return data_.data();}
 
     // flat indexing
     float& flat(size_t idx) {return data_[idx];}
-    float flat(size_t idx) const {return data_[idx];}
+    [[nodiscard]] float flat(size_t idx) const {return data_[idx];}
+
+    // map: apply f(float) -> float element-wise, return new tensor
+    template<typename F>
+    Tensor map(F f) const {
+        Tensor out;
+        for (size_t i = 0; i < Size; ++i) out.data_[i] = f(data_[i]);
+        return out;
+    }
+
+    // zip: apply f(float, float) -> float element-wise with another tensor, return new tensor
+    template<typename F>
+    Tensor zip(const Tensor& other, F f) const {
+        Tensor out;
+        for (size_t i = 0; i < Size; ++i) out.data_[i] = f(data_[i], other.data_[i]);
+        return out;
+    }
+
+    // apply: mutate each element in-place with f(float&)
+    template<typename F>
+    void apply(F f) {
+        for (size_t i = 0; i < Size; ++i) f(data_[i]);
+    }
+
+    // zip_apply: mutate each element in-place using corresponding element from other with f(float&, float)
+    template<typename F>
+    void zip_apply(const Tensor& other, F f) {
+        for (size_t i = 0; i < Size; ++i) f(data_[i], other.data_[i]);
+    }
 
 #define ACCESS_IMPL {                                                                   \
     static_assert(sizeof...(idxs) == Rank,"Number of indices must match tensor rank");  \
@@ -135,7 +164,6 @@ public:
     }                                                                                   \
     return data_[flat_index];                                                           \
     }
-
     // proper dimensional indexing
     template<typename... Indices>
     float& operator()(Indices... idxs) ACCESS_IMPL
@@ -218,7 +246,7 @@ struct KeptDimsHolder {
 template<size_t Skip, size_t... Dims>
 struct RemoveAxis {
     using type = typename ArrayToTensor<
-        // kept indices
+        // kept indices (actual values)
         KeptDimsHolder<Skip, Dims...>,
         // iota of the above to pattern-match and grab them into new Tensor type!
         std::make_index_sequence<sizeof...(Dims) - 1>
@@ -234,7 +262,7 @@ struct EinsumResultType;
 
 template<size_t I, size_t J, size_t... ADims, size_t... BDims>
 struct EinsumResultType<I, J, Tensor<ADims...>, Tensor<BDims...>> {
-    static_assert(DimGet<I, ADims...>::value == DimGet<J, BDims...>::value,
+    static_assert(SizeTemplateGet<I, ADims...>::value == SizeTemplateGet<J, BDims...>::value,
         "axis I from A and axis J from B must be same size!");
 
     using A_Reduced = typename RemoveAxis<I, ADims...>::type;
@@ -249,15 +277,15 @@ struct EinsumResultType<I, J, Tensor<ADims...>, Tensor<BDims...>> {
 // we iterate over free indices in EinsumResultType, and sum over contracted indices
 
 template<size_t I, size_t J, typename TA, typename TB>
-auto einsum(){};
+auto Einsum(){};
 
 template<size_t I, size_t J, size_t... ADims, size_t... BDims>
-auto einsum(const Tensor<ADims...>& A, const Tensor<BDims...>& B) {
+auto Einsum(const Tensor<ADims...>& A, const Tensor<BDims...>& B) {
     using Result = typename EinsumResultType<I, J, Tensor<ADims...>, Tensor<BDims...>>::type;
 
     constexpr size_t A_Rank = Tensor<ADims...>::Rank;
     constexpr size_t B_Rank = Tensor<BDims...>::Rank;
-    constexpr size_t ContractDimSize = DimGet<I, ADims...>::value;
+    constexpr size_t ContractDimSize = SizeTemplateGet<I, ADims...>::value;
 
     constexpr auto A_Strides = Tensor<ADims...>::Strides;
     constexpr auto B_Strides = Tensor<BDims...>::Strides;
@@ -343,9 +371,31 @@ auto einsum(const Tensor<ADims...>& A, const Tensor<BDims...>& B) {
     return C;
 }
 
+
+template<size_t... Dims>
+Tensor<Dims...> operator+(const Tensor<Dims...>& a, const Tensor<Dims...>& b) {
+    return a.zip(b, [](float x, float y) { return x + y; });
+}
+template<size_t... Dims>
+Tensor<Dims...> operator-(const Tensor<Dims...>& a, const Tensor<Dims...>& b) {
+    return a.zip(b, [](float x, float y) { return x - y; });
+}
+template<size_t... Dims>
+Tensor<Dims...>& operator+=(Tensor<Dims...>& a, const Tensor<Dims...>& b) {
+    a.zip_apply(b, [](float& x, float y) { x += y; });
+    return a;
+}
+template<size_t... Dims>
+Tensor<Dims...> operator*(const Tensor<Dims...>& a, float s) {
+    return a.map([s](float x) { return x * s; });
+}
+template<size_t... Dims>
+Tensor<Dims...> operator*(float s, const Tensor<Dims...>& a) { return a * s; }
+
+
 // outer product (no contraction) specialization
 template<size_t... ADims, size_t... BDims>
-auto einsum(const Tensor<ADims...>& A, const Tensor<BDims...>& B) {
+auto Einsum(const Tensor<ADims...>& A, const Tensor<BDims...>& B) {
     Tensor<ADims..., BDims...> C;
     // for each value of A
     for (size_t i = 0; i < Tensor<ADims...>::Size; i++) {
@@ -361,4 +411,5 @@ auto einsum(const Tensor<ADims...>& A, const Tensor<BDims...>& B) {
         }
     }
     return C;
+}
 }

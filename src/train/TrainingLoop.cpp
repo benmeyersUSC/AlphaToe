@@ -23,16 +23,7 @@ float TrainingLoop::run(AlphaToe& ai,
         for (size_t idx : indices) {
             const auto& s = buffer[idx].sample;
 
-            DynamicMatrix board(9, 1);
-            for (int j = 0; j < 9; j++) board.at(j, 0) = s.board[j];
-
-            DynamicMatrix policy(9, 1);
-            for (int j = 0; j < 9; j++) policy.at(j, 0) = s.policy[j];
-
-            DynamicMatrix value(1, 1);
-            value.at(0, 0) = s.value;
-
-            float loss = ai.trainStep(board, policy, value, lr, policyWeight, valueWeight);
+            float loss = ai.trainStep(s.board.data(), s.policy.data(), s.value, lr, policyWeight, valueWeight);
             buffer.updatePriority(idx, loss);
             totalLoss += loss;
         }
