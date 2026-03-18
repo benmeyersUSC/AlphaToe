@@ -1,7 +1,7 @@
 # AlphaToe
 This repository is my attempt to really claim understanding of DeepMind's AlphaZero ML approach.
 
-Building off a previous program which uses brute force 'ai' to play optimal tic tac toe, I am going to train an AlphaZero (which I'll call AlphaToe) to hopefully play just as well!
+Building off a previous program which uses brute force 'ai' (Minimax) to play optimal tic tac toe, I am going to train an AlphaZero (which I'll call AlphaToe) to hopefully play just as well!
 
 it uses monte carlo tree search, augmented with a two-headed NN for policy and value at each state, to sample the tree.
 
@@ -9,7 +9,6 @@ again, with 3x3 tic tac toe, the full tree is (exceedingly) tractable but I am p
 
 
 
-The code is not as clean as it should be -- this was an end of summer race towards proof of concept -- but running main will work to play against AlphaToe! If you want to train it further, increase the number of iterations. 
-
-
-It is a rather strong player, though there are definitely gaps in its play. I need to improve my systematic creation of diverse data for self play!
+This codebase utilizes my Template Tensor Neural Network ([TTNN](https://github.com/benmeyersUSC/AlphaToe)) library, in which I create 
+my dream: tensors and neural networks (A) whose shapes are enforced by compile-time templates and (B)
+whose entire suite Inner/Outer Product and MATMUL operations flow through a generalized Einsum function!

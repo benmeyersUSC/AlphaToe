@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- shared neural network library (header-only: Tensor.hpp + NeuralNet.hpp) ---
 add_library(cppNN INTERFACE)
-target_include_directories(cppNN INTERFACE cppNN)
+target_include_directories(cppNN INTERFACE TTNN)
 
 # --- core TTT game library ---
 add_library(tttcore
